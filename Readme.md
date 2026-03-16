@@ -1,8 +1,8 @@
 
-**. 基础框架：连续时间一致性 (sCM/MeanFlow)**
-• **目标**：将原本需要 50-100 步的扩散模型推理，压缩至 1-4 步。
-• **机制**：在连续时间域内学习一个一致性函数 $f: (\mathbf{x}_t, t) \to \mathbf{x}_0$。与离散版本不同，它通过 ODE 轨迹的切向量来维持一致性。
-• **瓶颈**：在 14B 规模（如 Cosmos-Predict2）下，纯 sCM 的 Forward KL 属性会导致模型尝试覆盖所有数据分布，在 1-step 生成时表现为纹理模糊、物体结构塌陷（Object interpenetration）。
+**基础框架：连续时间一致性 (sCM/MeanFlow)**
+1. **目标**：将原本需要 50-100 步的扩散模型推理，压缩至 1-4 步。
+2. **机制**：在连续时间域内学习一个一致性函数 $f: (\mathbf{x}_t, t) \to \mathbf{x}_0$。与离散版本不同，它通过 ODE 轨迹的切向量来维持一致性。
+3. **瓶颈**：在 14B 规模（如 Cosmos-Predict2）下，纯 sCM 的 Forward KL 属性会导致模型尝试覆盖所有数据分布，在 1-step 生成时表现为纹理模糊、物体结构塌陷（Object interpenetration）。
 
 **创新点：**
 1. JVPkernal精度提升，14B 模型必须使用 **Context Parallelism (CP)** 和 **BF16** 精度，但标准的梯度计算在 BF16 下会产生“实质性的数值误差”，导致蒸馏过程发散。
