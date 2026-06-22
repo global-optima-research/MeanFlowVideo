@@ -1,0 +1,160 @@
+# 周报 | Weekly Report
+
+---
+
+## 基本信息
+
+- **姓名：** 邱张西子
+- **日期：** 2026-06-22
+
+---
+
+## 1. 研究领域
+
+基于预训练视频扩散模型的个性化视频生成，具体方向为将 **Test-Time Training（TTT）** 机制引入 Wan2.1 视频 DiT，使模型在推理时具备对特定主体的外观适应能力，结合 ref_proj 参考图注入实现主体个性化生成。
+
+---
+
+## 2. 本周工作
+
+### 2.1 Stage1 训练完成（DAVIS 数据集）
+
+将训练数据从 MSR-VTT 切换至 **DAVIS 2019**（89 个序列），完成 Stage1 训练：
+
+- 预计算三类特征：VAE latents（shape: `(16,13,34,60)`）、T5 text embeddings、CLIP ref embeddings（shape: `(1,1024)`）
+- 训练配置：2 卡，batch_size=4，grad_accum=2，effective batch=8，num_steps=3000，lr_ttt=1e-4
+- 训练结果：loss 从初期 ~0.19 收敛至 ~0.13，训练正常完成
+
+| 阶段 | 数据集 | 步数 | 最终 Loss | checkpoint |
+|------|--------|------|-----------|------------|
+| Stage1 | DAVIS 89 sequences | 3000 | ~0.13 | step_003000.pt |
+
+### 2.2 Stage2 元学习训练（DAVIS 数据集）
+
+基于 Stage1 checkpoint，完成 MAML-style 元学习训练：
+
+- 为 Stage2 生成 `dataset_stage2.jsonl`，补充 `ref_emb`、`subject_group` 字段（89 条，7 个 subject groups，68 个有效 episodes）
+- 训练配置：单卡，inner_steps=1，num_steps=3000，lr_meta=1e-4
+- 训练结果：loss 收敛至 ~0.11
+
+| 阶段 | 数据集 | 步数 | 最终 Loss | checkpoint |
+|------|--------|------|-----------|------------|
+| Stage2 | DAVIS 89 sequences | 3000 | ~0.11 | final.pt |
+
+### 2.3 推理调试与问题定位
+
+#### 问题1：漫画感与颜色偏移
+
+Stage1/Stage2 推理结果出现明显卡通化风格，颜色偏橙。定位原因：
+
+- 参考图 `ref_dog6.jpg` 为橙色 studio 背景，CLIP 将整张图编码（包含背景色），ref_proj 将橙色信息注入 context，影响生成风格
+- 解决方案：使用 `rembg` 对参考图抠背景，生成 `ref_dog6_nobg.jpg`（白色背景），消除背景色干扰
+
+#### 问题2：V* prompt 格式不一致
+
+训练 caption 格式为 `V* <描述>`（句首直接 V*，无冠词），而早期推理使用了 `[V]` 或 `a V* ...`，导致 prompt 分布与训练不匹配。统一修正为 `V* dog running on the beach`。
+
+#### 问题3：stage1 中间 checkpoint 推理结果乱
+
+step1000、step2000 的 checkpoint 推理结果混乱，step3000 正常。原因：中间 checkpoint 权重尚未收敛，TTT adapt 在不稳定的权重基础上反而产生负效果；step3000 收敛后 adapt 能正常工作。
+
+#### 问题4：stage2 狗颜色偏黑
+
+Stage2 推理结果中狗的颜色偏黑，原因在于 DAVIS dog 类别训练样本中深色狗占多数（5 个样本中 3 个为黑色/深色），meta-learning 将 dog subject group 与深色外观强关联。抠图后问题明显缓解。
+
+### 2.4 推理对比实验
+
+使用 prompt `V* dog running on the beach`，参考图 `ref_dog6_nobg.jpg`（抠图后柯基），seed=42，对五组进行对比：
+
+| 组别 | checkpoint | ref | 说明 |
+|------|-----------|-----|------|
+| ① baseline | 无（原始 Wan2.1） | 无 | prompt: `a dog running on the beach` |
+| ② Stage1 step1000 | davis_demo/step_001000.pt | ✓ 抠图 | 结果混乱，权重未收敛 |
+| ③ Stage1 step2000 | davis_demo/step_002000.pt | ✓ 抠图 | 结果混乱，权重未收敛 |
+| ④ Stage1 step3000 | davis_demo/step_003000.pt | ✓ 抠图 | 有效果，收敛后稳定 |
+| ⑤ Stage2 step3000 | stage2_davis/final.pt | ✓ 抠图 | 元学习结果 |
+
+#### 视频对比
+
+**① Baseline — 原始 Wan2.1**
+
+![baseline](dog6_baseline_final.mp4)
+
+**② Stage1 step1000**
+
+![stage1_step1000](dog6_stage1_step1000.mp4)
+
+**③ Stage1 step2000**
+
+![stage1_step2000](dog6_stage1_step2000.mp4)
+
+**④ Stage1 step3000（DAVIS 训练，抠图参考图）**
+
+![stage1_nobg](dog6_stage1_nobg.mp4)
+
+**⑤ Stage2 step3000（元学习，抠图参考图）**
+
+![stage2_nobg](dog6_stage2_nobg.mp4)
+
+---
+
+## 3. 结论与发现
+
+1. **参考图背景对 CLIP embedding 影响显著**：纯色背景会主导 CLIP 视觉特征，通过抠图去除背景后，ref_proj 注入的视觉信息更接近主体本身，生成颜色和风格更自然。
+
+2. **V* prompt 格式需与训练一致**：训练时 caption 格式为 `V* <描述>`（无冠词），推理时需严格匹配，否则 V* token 的语义绑定效果会下降。
+
+3. **stage1 中间 checkpoint 不适合推理**：TTT adapt 依赖收敛的 base weights，未收敛的中间权重会被 adapt 进一步破坏；建议只用最终 checkpoint 推理。
+
+4. **DAVIS 数据集 subject group 分布不均**：dog 类别仅 5 个样本，其中深色占多数，导致 stage2 元学习对颜色产生错误偏好；后续需要扩充数据或细化 group 划分。
+
+---
+
+## 4. 下周计划
+
+- [ ] 扩充 DAVIS dog 类别参考图，补充更多浅色/不同品种的狗样本，解决颜色偏黑问题
+- [ ] 调研更大规模数据集（Panda-70M）接入方案，提升 subject group 多样性
+- [ ] 分析 stage2 元学习对推理效果的具体提升，对比 stage1 vs stage2 在多个 subject 上的 CLIP-SIM 指标
+- [ ] 考虑对 ref_proj 的训练加更强的正则或对比学习目标，提升外观注入的准确性
+
+---
+
+## 附录
+
+### 当前训练状态
+
+| 项目 | 数值 |
+|------|------|
+| 数据集 | DAVIS 2019，89 sequences |
+| 分辨率 | 272×480，3s@16fps |
+| Stage1 最终步数 | 3000 / 3000 ✓ |
+| Stage2 最终步数 | 3000 / 3000 ✓ |
+| GPU | qiuzhangxizi 服务器（111.17.197.107），RTX 5090 ×8 |
+| 推理 GPU | 单卡 RTX 5090（卡6） |
+
+### 关键超参数
+
+```toml
+# Stage1
+[training]
+num_steps = 3000
+lr_ttt = 1e-4
+weight_decay = 0.01
+cross_ref = true
+
+# Stage2
+[meta]
+n_support = 3
+inner_steps = 1
+inner_lr = 1e-3
+first_order = true
+lr_meta = 1e-4
+```
+
+### 参考文献
+
+1. Sun, Y., et al. *Learning to (Learn at Test Time): RNNs with Expressive Hidden States.* arXiv:2407.04620, 2024.
+2. Dalal, G., et al. *Test-Time Training on Video with TTT-Linear.* (ttt-video-dit), 2024.
+3. Wan Team (Alibaba). *Wan: Open and Advanced Large-Scale Video Generative Models.* 2025.
+4. Ruiz, N., et al. *DreamBooth: Fine Tuning Text-to-Image Diffusion Models for Subject-Driven Generation.* CVPR 2023.
+5. Finn, C., et al. *Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks.* ICML 2017.
