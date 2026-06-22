@@ -78,23 +78,23 @@ Stage2 推理结果中狗的颜色偏黑，原因在于 DAVIS dog 类别训练�
 
 **① Baseline — 原始 Wan2.1**
 
-![baseline](dog6_baseline_final.mp4)
+<video src="video/0622/dog6_baseline_final.mp4" controls width="480"></video>
 
 **② Stage1 step1000**
 
-![stage1_step1000](dog6_stage1_step1000.mp4)
+<video src="video/0622/dog6_stage1_step1000.mp4" controls width="480"></video>
 
 **③ Stage1 step2000**
 
-![stage1_step2000](dog6_stage1_step2000.mp4)
+<video src="video/0622/dog6_stage1_step2000.mp4" controls width="480"></video>
 
 **④ Stage1 step3000（DAVIS 训练，抠图参考图）**
 
-![stage1_nobg](dog6_stage1_nobg.mp4)
+<video src="video/0622/dog6_stage1_nobg.mp4" controls width="480"></video>
 
 **⑤ Stage2 step3000（元学习，抠图参考图）**
 
-![stage2_nobg](dog6_stage2_nobg.mp4)
+<video src="video/0622/dog6_stage2_nobg.mp4" controls width="480"></video>
 
 ---
 
